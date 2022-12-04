@@ -38,9 +38,8 @@ class _MyHomePageState extends State<MyHomePage> {
     chunkedDownloader = await ChunkedDownloader(
         url:
             'https://filesamples.com/samples/video/mjpeg/sample_3840x2160.mjpeg',
-        savedDir: '/temp',
+        saveFilePath: '/temp/test.mjpeg',
         chunkSize: 1024 * 1024,
-        fileName: 'deletemeshawn.mjpeg',
         onProgress: (received, total, speed) {
           status = '';
           if (total != -1) {
