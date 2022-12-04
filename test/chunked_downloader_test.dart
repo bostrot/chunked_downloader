@@ -1,8 +1,7 @@
 import 'dart:io';
 
-import 'package:flutter_test/flutter_test.dart';
-
 import 'package:chunked_downloader/chunked_downloader.dart';
+import 'package:test/test.dart';
 
 void main() {
   String img = 'https://storage.googleapis.com/cms-storage-bucket'
