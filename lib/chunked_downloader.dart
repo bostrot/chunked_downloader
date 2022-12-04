@@ -87,7 +87,7 @@ class ChunkedDownloader {
       stream = response.asStream().listen(null);
       stream?.onData((http.StreamedResponse r) async {
         // Get file size
-        int fileSize = int.parse(r.headers['content-length'] ?? '-1');
+        int fileSize = int.tryParse(r.headers['content-length'] ?? '-1') ?? -1;
         reader = ChunkedStreamReader(r.stream);
         try {
           Uint8List buffer;
@@ -105,12 +105,14 @@ class ChunkedDownloader {
             // Calculate speed
             int endTime = DateTime.now().millisecondsSinceEpoch;
             int timeDiff = endTime - startTime;
-            speed = (buffer.length / timeDiff) * 1000;
+            if (timeDiff > 0) {
+              speed = (buffer.length / timeDiff) * 1000;
+            }
 
             // Add buffer to chunks list
             offset += buffer.length;
             if (kDebugMode) {
-              print('Downloading $fileName ${offset ~/ 1024 ~/ 1024}MB '
+              print('Downloading ${offset ~/ 1024 ~/ 1024}MB '
                   'Speed: ${speed ~/ 1024 ~/ 1024}MB/s');
             }
             if (onProgress != null) {
@@ -121,19 +123,22 @@ class ChunkedDownloader {
           } while (buffer.length == chunkSize);
 
           // Rename file from .tmp to non-tmp extension
-          await file.rename('$savedDir/$fileName');
+          await file.rename(saveFilePath);
 
           // Send done callback
           done = true;
           if (onDone != null) {
-            onDone!(File('$savedDir/$fileName'));
+            onDone!(file);
           }
           if (kDebugMode) {
-            print('Downloaded $fileName');
+            print('Downloaded file.');
           }
-        } catch (e) {
+        } catch (error) {
           if (kDebugMode) {
-            print(e);
+            print('Error downloading: $error');
+          }
+          if (onError != null) {
+            onError!(error);
           }
         } finally {
           reader?.cancel();
