@@ -56,7 +56,7 @@ class ChunkedDownloader {
 
   ChunkedDownloader({
     required this.url,
-    required this.fileName,
+    required this.saveFilePath,
     required this.savedDir,
     this.chunkSize = 1024 * 1024, // 1 MB
     this.onProgress,
@@ -78,7 +78,7 @@ class ChunkedDownloader {
       var response = httpClient.send(request);
 
       // Open file
-      File file = File('$savedDir/$fileName.tmp');
+      File file = File('$saveFilePath.tmp');
 
       stream = response.asStream().listen(null);
       stream?.onData((http.StreamedResponse r) async {
