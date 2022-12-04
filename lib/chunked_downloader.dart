@@ -39,8 +39,7 @@ typedef OnErrorCallback = void Function(dynamic error);
 ///
 class ChunkedDownloader {
   final String url;
-  final String fileName;
-  final String savedDir;
+  final String saveFilePath;
   final int chunkSize;
   final ProgressCallback? onProgress;
   final OnDoneCallback? onDone;
@@ -50,6 +49,7 @@ class ChunkedDownloader {
   final Function? onResume;
   StreamSubscription<StreamedResponse>? stream;
   ChunkedStreamReader<int>? reader;
+  Map<String, String>? headers;
   double speed = 0;
   bool paused = false;
   bool done = false;
@@ -57,7 +57,7 @@ class ChunkedDownloader {
   ChunkedDownloader({
     required this.url,
     required this.saveFilePath,
-    required this.savedDir,
+    this.headers,
     this.chunkSize = 1024 * 1024, // 1 MB
     this.onProgress,
     this.onDone,
@@ -75,6 +75,10 @@ class ChunkedDownloader {
       int offset = 0;
       var httpClient = http.Client();
       var request = http.Request('GET', Uri.parse(url));
+      // Set headers
+      if (headers != null) {
+        request.headers.addAll(headers!);
+      }
       var response = httpClient.send(request);
 
       // Open file
