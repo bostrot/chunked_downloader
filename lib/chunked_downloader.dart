@@ -2,9 +2,9 @@ library chunked_downloader;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:async/async.dart';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/http.dart';
 
@@ -53,6 +53,7 @@ class ChunkedDownloader {
   double speed = 0;
   bool paused = false;
   bool done = false;
+  static const bool kDebugMode = false;
 
   ChunkedDownloader({
     required this.url,
