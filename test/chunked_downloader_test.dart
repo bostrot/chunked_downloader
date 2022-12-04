@@ -11,8 +11,7 @@ void main() {
     bool done = false;
     ChunkedDownloader(
         url: img,
-        savedDir: '/tmp',
-        fileName: 'flutter_image.png',
+        saveFilePath: '/tmp/flutter_image.png',
         onProgress: (received, total, speed) {},
         onDone: (file) {
           done = true;
