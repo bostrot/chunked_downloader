@@ -6,7 +6,6 @@ import 'dart:typed_data';
 
 import 'package:async/async.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/http.dart';
 
 /// Progress Callback
 /// [progress] is the current progress in bytes
@@ -47,13 +46,15 @@ class ChunkedDownloader {
   final Function? onCancel;
   final Function? onPause;
   final Function? onResume;
-  StreamSubscription<StreamedResponse>? stream;
   ChunkedStreamReader<int>? reader;
   Map<String, String>? headers;
   double speed = 0;
   bool paused = false;
   bool done = false;
   static const bool kDebugMode = false;
+
+  // Better pausing mechanism
+  Completer<void>? _pauseCompleter;
 
   ChunkedDownloader({
     required this.url,
@@ -80,72 +81,71 @@ class ChunkedDownloader {
       if (headers != null) {
         request.headers.addAll(headers!);
       }
-      var response = httpClient.send(request);
+      var response = await httpClient.send(request);
 
       // Open file
       File file = File('$saveFilePath.tmp');
 
-      stream = response.asStream().listen(null);
-      stream?.onData((http.StreamedResponse r) async {
-        // Get file size
-        int fileSize = int.tryParse(r.headers['content-length'] ?? '-1') ?? -1;
-        reader = ChunkedStreamReader(r.stream);
-        try {
-          Uint8List buffer;
-          do {
-            // TODO: better pausing
-            while (paused) {
-              await Future.delayed(const Duration(milliseconds: 500));
-            }
-            // Set start time for speed calculation
-            int startTime = DateTime.now().millisecondsSinceEpoch;
+      // Get file size directly from response
+      int fileSize = response.contentLength ?? -1;
+      reader = ChunkedStreamReader(response.stream);
 
-            // Read chunk
-            buffer = await reader!.readBytes(chunkSize);
-
-            // Calculate speed
-            int endTime = DateTime.now().millisecondsSinceEpoch;
-            int timeDiff = endTime - startTime;
-            if (timeDiff > 0) {
-              speed = (buffer.length / timeDiff) * 1000;
-            }
-
-            // Add buffer to chunks list
-            offset += buffer.length;
-            if (kDebugMode) {
-              print('Downloading ${offset ~/ 1024 ~/ 1024}MB '
-                  'Speed: ${speed ~/ 1024 ~/ 1024}MB/s');
-            }
-            if (onProgress != null) {
-              onProgress!(offset, fileSize, speed);
-            }
-            // Write buffer to disk
-            await file.writeAsBytes(buffer, mode: FileMode.append);
-          } while (buffer.length == chunkSize);
-
-          // Rename file from .tmp to non-tmp extension
-          await file.rename(saveFilePath);
-
-          // Send done callback
-          done = true;
-          if (onDone != null) {
-            onDone!(file);
+      try {
+        Uint8List buffer;
+        do {
+          // Better pausing mechanism - wait for resume if paused
+          if (paused && _pauseCompleter != null) {
+            await _pauseCompleter!.future;
           }
+
+          // Set start time for speed calculation
+          int startTime = DateTime.now().millisecondsSinceEpoch;
+
+          // Read chunk
+          buffer = await reader!.readBytes(chunkSize);
+
+          // Calculate speed
+          int endTime = DateTime.now().millisecondsSinceEpoch;
+          int timeDiff = endTime - startTime;
+          if (timeDiff > 0) {
+            speed = (buffer.length / timeDiff) * 1000;
+          }
+
+          // Add buffer to chunks list
+          offset += buffer.length;
           if (kDebugMode) {
-            print('Downloaded file.');
+            print('Downloading ${offset ~/ 1024 ~/ 1024}MB '
+                'Speed: ${speed ~/ 1024 ~/ 1024}MB/s');
           }
-        } catch (error) {
-          if (kDebugMode) {
-            print('Error downloading: $error');
+          if (onProgress != null) {
+            onProgress!(offset, fileSize, speed);
           }
-          if (onError != null) {
-            onError!(error);
-          }
-        } finally {
-          reader?.cancel();
-          stream?.cancel();
+          // Write buffer to disk
+          await file.writeAsBytes(buffer, mode: FileMode.append);
+        } while (buffer.length == chunkSize);
+
+        // Rename file from .tmp to non-tmp extension
+        await file.rename(saveFilePath);
+
+        // Send done callback
+        done = true;
+        if (onDone != null) {
+          onDone!(file);
         }
-      });
+        if (kDebugMode) {
+          print('Downloaded file.');
+        }
+      } catch (error) {
+        if (kDebugMode) {
+          print('Error downloading: $error');
+        }
+        if (onError != null) {
+          onError!(error);
+        }
+      } finally {
+        reader?.cancel();
+        httpClient.close();
+      }
     } catch (error) {
       if (kDebugMode) {
         print('Error downloading: $error');
@@ -159,8 +159,11 @@ class ChunkedDownloader {
 
   /// Stop the download
   void stop() {
-    stream?.cancel();
     reader?.cancel();
+    // Complete any pending pause to avoid hanging
+    if (_pauseCompleter != null && !_pauseCompleter!.isCompleted) {
+      _pauseCompleter!.complete();
+    }
     if (onCancel != null) {
       onCancel!();
     }
@@ -168,17 +171,26 @@ class ChunkedDownloader {
 
   /// Pause the download
   void pause() {
-    paused = true;
-    if (onPause != null) {
-      onPause!();
+    if (!paused) {
+      paused = true;
+      _pauseCompleter = Completer<void>();
+      if (onPause != null) {
+        onPause!();
+      }
     }
   }
 
   /// Resume the download
   void resume() {
-    paused = false;
-    if (onResume != null) {
-      onResume!();
+    if (paused) {
+      paused = false;
+      if (_pauseCompleter != null && !_pauseCompleter!.isCompleted) {
+        _pauseCompleter!.complete();
+      }
+      _pauseCompleter = null;
+      if (onResume != null) {
+        onResume!();
+      }
     }
   }
 }
