@@ -20,6 +20,9 @@ typedef OnDoneCallback = void Function(File file);
 /// [error] is the error that occured
 typedef OnErrorCallback = void Function(dynamic error);
 
+/// Void Callback
+typedef VoidCallback = void Function();
+
 /// Custom Downloader with ChunkSize
 ///
 /// [chunkSize] is the size of each chunk in bytes
@@ -43,18 +46,20 @@ class ChunkedDownloader {
   final ProgressCallback? onProgress;
   final OnDoneCallback? onDone;
   final OnErrorCallback? onError;
-  final Function? onCancel;
-  final Function? onPause;
-  final Function? onResume;
+  final VoidCallback? onCancel;
+  final VoidCallback? onPause;
+  final VoidCallback? onResume;
   ChunkedStreamReader<int>? reader;
   Map<String, String>? headers;
   double speed = 0;
   bool paused = false;
   bool done = false;
+  bool _cancelled = false;
   static const bool kDebugMode = false;
 
   // Better pausing mechanism
   Completer<void>? _pauseCompleter;
+  http.Client? _httpClient;
 
   ChunkedDownloader({
     required this.url,
@@ -72,19 +77,30 @@ class ChunkedDownloader {
   /// Start the download
   /// @result {Future<ChunkedDownloader>} the current instance of the downloader
   Future<ChunkedDownloader> start() async {
-    // Download file
+    if (done || _cancelled) {
+      throw StateError('Download already completed or cancelled');
+    }
+
     try {
       int offset = 0;
-      var httpClient = http.Client();
+      _httpClient = http.Client();
       var request = http.Request('GET', Uri.parse(url));
+
       // Set headers
       if (headers != null) {
         request.headers.addAll(headers!);
       }
-      var response = await httpClient.send(request);
 
-      // Open file
+      var response = await _httpClient!.send(request);
+
+      // Check for HTTP errors
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException('HTTP ${response.statusCode}: ${response.reasonPhrase}');
+      }
+
+      // Create directory if it doesn't exist
       File file = File('$saveFilePath.tmp');
+      await file.parent.create(recursive: true);
 
       // Get file size directly from response
       int fileSize = response.contentLength ?? -1;
@@ -93,77 +109,108 @@ class ChunkedDownloader {
       try {
         Uint8List buffer;
         do {
+          // Check if cancelled
+          if (_cancelled) {
+            break;
+          }
+
           // Better pausing mechanism - wait for resume if paused
           if (paused && _pauseCompleter != null) {
             await _pauseCompleter!.future;
           }
 
+          // Check again after potential pause
+          if (_cancelled) {
+            break;
+          }
+
           // Set start time for speed calculation
           int startTime = DateTime.now().millisecondsSinceEpoch;
 
-          // Read chunk
+          // Read chunk with timeout
           buffer = await reader!.readBytes(chunkSize);
 
-          // Calculate speed
+          // Calculate speed (bytes per second)
           int endTime = DateTime.now().millisecondsSinceEpoch;
           int timeDiff = endTime - startTime;
           if (timeDiff > 0) {
             speed = (buffer.length / timeDiff) * 1000;
           }
 
-          // Add buffer to chunks list
           offset += buffer.length;
           if (kDebugMode) {
-            print('Downloading ${offset ~/ 1024 ~/ 1024}MB '
-                'Speed: ${speed ~/ 1024 ~/ 1024}MB/s');
+            print('Downloading ${(offset / (1024 * 1024)).toStringAsFixed(2)}MB '
+                'Speed: ${(speed / (1024 * 1024)).toStringAsFixed(2)}MB/s');
           }
+
           if (onProgress != null) {
             onProgress!(offset, fileSize, speed);
           }
+
           // Write buffer to disk
           await file.writeAsBytes(buffer, mode: FileMode.append);
-        } while (buffer.length == chunkSize);
+        } while (buffer.length == chunkSize && !_cancelled);
 
-        // Rename file from .tmp to non-tmp extension
-        await file.rename(saveFilePath);
+        if (!_cancelled) {
+          // Rename file from .tmp to final name
+          await file.rename(saveFilePath);
 
-        // Send done callback
-        done = true;
-        if (onDone != null) {
-          onDone!(file);
-        }
-        if (kDebugMode) {
-          print('Downloaded file.');
+          // Send done callback
+          done = true;
+          if (onDone != null) {
+            onDone!(File(saveFilePath));
+          }
+          if (kDebugMode) {
+            print('Download completed successfully.');
+          }
+        } else {
+          // Clean up temp file if cancelled
+          if (await file.exists()) {
+            await file.delete();
+          }
         }
       } catch (error) {
         if (kDebugMode) {
-          print('Error downloading: $error');
+          print('Error during download: $error');
         }
+
+        // Clean up temp file on error
+        if (await File('$saveFilePath.tmp').exists()) {
+          await File('$saveFilePath.tmp').delete();
+        }
+
         if (onError != null) {
           onError!(error);
         }
+        rethrow;
       } finally {
-        reader?.cancel();
-        httpClient.close();
+        await reader?.cancel();
+        _httpClient?.close();
+        _httpClient = null;
       }
     } catch (error) {
       if (kDebugMode) {
-        print('Error downloading: $error');
+        print('Error starting download: $error');
       }
       if (onError != null) {
         onError!(error);
       }
+      rethrow;
     }
     return this;
   }
 
   /// Stop the download
   void stop() {
+    _cancelled = true;
     reader?.cancel();
+    _httpClient?.close();
+
     // Complete any pending pause to avoid hanging
     if (_pauseCompleter != null && !_pauseCompleter!.isCompleted) {
       _pauseCompleter!.complete();
     }
+
     if (onCancel != null) {
       onCancel!();
     }
