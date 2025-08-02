@@ -1,3 +1,8 @@
+## 1.0.0
+
+* Some refactoring
+* Better pause handling
+
 ## 0.0.2
 
 * Better error handling
