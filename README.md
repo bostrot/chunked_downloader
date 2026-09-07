@@ -20,9 +20,9 @@ You can use it like this: (note that everything is in bytes)
 ```dart
     var chunkedDownloader = await ChunkedDownloader(
         url: 'https://filesamples.com/samples/video/mjpeg/sample_3840x2160.mjpeg',
-        savedDir: '/temp',
-        fileName: 'sometestfile.mjpeg',
+        saveFilePath: '/tmp/sometestfile.mjpeg',
         chunkSize: 1024 * 1024,
+        headers: {'Authorization': 'Bearer token'},
         onError: (error) {},
         onProgress: (received, total, speed) {},
         onDone: (file) {})
@@ -32,3 +32,7 @@ chunkedDownloader.pause();
 chunkedDownloader.resume();
 chunkedDownloader.stop();
 ```
+
+The download is written to `<saveFilePath>.tmp` first and only renamed to
+`saveFilePath` once it completed, so a cancelled or failed download never
+leaves a half written file behind.

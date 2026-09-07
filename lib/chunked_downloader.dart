@@ -1,6 +1,5 @@
-library chunked_downloader;
-
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -74,8 +73,13 @@ class ChunkedDownloader {
     this.onResume,
   });
 
+  /// Log a debug message when [kDebugMode] is enabled
+  void _log(String message) {
+    developer.log(message, name: 'chunked_downloader');
+  }
+
   /// Start the download
-  /// @result {Future<ChunkedDownloader>} the current instance of the downloader
+  /// @result `Future<ChunkedDownloader>` the current instance of the downloader
   Future<ChunkedDownloader> start() async {
     if (done || _cancelled) {
       throw StateError('Download already completed or cancelled');
@@ -95,12 +99,19 @@ class ChunkedDownloader {
 
       // Check for HTTP errors
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException('HTTP ${response.statusCode}: ${response.reasonPhrase}');
+        throw HttpException(
+            'HTTP ${response.statusCode}: ${response.reasonPhrase}');
       }
 
       // Create directory if it doesn't exist
       File file = File('$saveFilePath.tmp');
       await file.parent.create(recursive: true);
+
+      // Drop a leftover temp file from a previously aborted run, otherwise the
+      // appended chunks below would be written on top of stale bytes
+      if (await file.exists()) {
+        await file.delete();
+      }
 
       // Get file size directly from response
       int fileSize = response.contentLength ?? -1;
@@ -139,7 +150,7 @@ class ChunkedDownloader {
 
           offset += buffer.length;
           if (kDebugMode) {
-            print('Downloading ${(offset / (1024 * 1024)).toStringAsFixed(2)}MB '
+            _log('Downloading ${(offset / (1024 * 1024)).toStringAsFixed(2)}MB '
                 'Speed: ${(speed / (1024 * 1024)).toStringAsFixed(2)}MB/s');
           }
 
@@ -161,7 +172,7 @@ class ChunkedDownloader {
             onDone!(File(saveFilePath));
           }
           if (kDebugMode) {
-            print('Download completed successfully.');
+            _log('Download completed successfully.');
           }
         } else {
           // Clean up temp file if cancelled
@@ -171,7 +182,7 @@ class ChunkedDownloader {
         }
       } catch (error) {
         if (kDebugMode) {
-          print('Error during download: $error');
+          _log('Error during download: $error');
         }
 
         // Clean up temp file on error
@@ -190,7 +201,7 @@ class ChunkedDownloader {
       }
     } catch (error) {
       if (kDebugMode) {
-        print('Error starting download: $error');
+        _log('Error starting download: $error');
       }
       if (onError != null) {
         onError!(error);
